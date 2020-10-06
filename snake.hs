@@ -63,6 +63,20 @@ updateDirection (SSnake body oldDirection) direction
       SPosition x _ : SPosition x' _ : _ -> x == x'
       _ -> True
 
+randomFood :: StdGen -> [SPosition] -> ([SPosition], StdGen)
+randomFood rng body =
+  if emptyCells == []
+    then ([], rng)
+    else case randomR (0 :: Int, length emptyCells - 1) rng of
+      (idx, rng') -> ([emptyCells !! idx], rng')
+  where
+    emptyCells =
+      [ SPosition x y
+        | x <- [lowerGridBound .. upperGridBound],
+          y <- [lowerGridBound .. upperGridBound],
+          not $ SPosition x y `elem` body
+      ]
+
 moveSnake :: SState -> SState
 moveSnake (SState (SSnake body direction) status food rng) =
   SState (SSnake newBody direction) newStatus newFood newRng
@@ -79,17 +93,6 @@ moveSnake (SState (SSnake body direction) status food rng) =
           || max newX newY > upperGridBound
           || newHead `elem` tail newBody
     willEatFood = newHead `elem` food
-    (newFood, newRng) =
-      if not willEatFood || emptyCells == []
-        then (food, rng)
-        else case randomR (0 :: Int, length emptyCells - 1) rng of
-          (idx, rng') -> ([emptyCells !! idx], rng')
-    emptyCells =
-      [ SPosition x y
-        | x <- [lowerGridBound .. upperGridBound],
-          y <- [lowerGridBound .. upperGridBound],
-          not $ SPosition x y `elem` newBody
-      ]
     newStatus = if willBeOutOfBounds then SOver else status
     newBody =
       if status == SOver
@@ -98,6 +101,7 @@ moveSnake (SState (SSnake body direction) status food rng) =
           if willEatFood
             then newHead : body
             else newHead : (reverse $ tail $ reverse body)
+    (newFood, newRng) = if willEatFood then randomFood rng body else (food, rng)
 
 appEvent :: SState -> T.BrickEvent () STimeUnitEvent -> T.EventM () (T.Next SState)
 appEvent state@(SState snake status food rng) (T.VtyEvent (V.EvKey keyAction [])) = case keyAction of
@@ -133,8 +137,11 @@ main = do
   eventChan <- Brick.BChan.newBChan 1
   let buildVty = Graphics.Vty.mkVty Graphics.Vty.defaultConfig
   initialVty <- buildVty
-  rng <- getStdGen
-  let initialState = SState (SSnake [SPosition x 10 | x <- [12, 11 .. 10]] SRight) SStarted [SPosition 3 3] rng
+  seed <- randomIO :: IO Int
+  let rng = mkStdGen seed
+      body = [SPosition x 10 | x <- [12, 11 .. 10]]
+      (food, _) = randomFood rng body
+      initialState = SState (SSnake body SRight) SStarted food rng
   _ <- forkIO $ pingSnake eventChan
   _ <- M.customMain initialVty buildVty (Just eventChan) app initialState
   return ()
