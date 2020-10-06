@@ -8,4 +8,3 @@ executable snake
   ghc-options: -Wall -threaded -rtsopts -with-rtsopts=-N
   build-depends: base >=4.7 && <5, brick, vty, containers
   default-language: Haskell2010
-  default-extensions: DuplicateRecordFields

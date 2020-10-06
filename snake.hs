@@ -12,28 +12,15 @@ import Control.Monad
 import Graphics.Vty
 import qualified Graphics.Vty as V
 
-data SPosition = SPosition
-  { sRow :: Integer,
-    sColumn :: Integer
-  }
-  deriving (Show, Eq)
+data SPosition = SPosition Integer Integer deriving (Show, Eq)
 
-data SDirection = SUp | SRight | SDown | SLeft
-  deriving (Show, Eq)
+data SDirection = SUp | SRight | SDown | SLeft deriving (Show, Eq)
 
-data SSnake = SSnake
-  { sBody :: [SPosition],
-    sDirection :: SDirection
-  }
-  deriving (Show, Eq)
+data SSnake = SSnake [SPosition] SDirection deriving (Show, Eq)
 
 data SStatus = SStarted | SInProgress | SOver deriving (Show, Eq)
 
-data SState = SState
-  { sSnake :: SSnake,
-    sStatus :: SStatus
-  }
-  deriving (Show, Eq)
+data SState = SState SSnake SStatus deriving (Show, Eq)
 
 data STimeUnitEvent = STimeUnitEvent
 
@@ -44,18 +31,18 @@ upperGridBound :: Integer
 upperGridBound = 20
 
 snakeMatrix :: SSnake -> [String]
-snakeMatrix snake = [line n | n <- [lowerGridBound .. upperGridBound]]
+snakeMatrix (SSnake body _) = [line y | y <- [upperGridBound, upperGridBound - 1 .. lowerGridBound]]
   where
-    cell r c = if SPosition {sRow = r, sColumn = c} `elem` (sBody snake) then "()" else "  "
-    line n = concat [cell n c | c <- [lowerGridBound .. upperGridBound]]
+    cell x y = if SPosition x y `elem` body then "()" else "  "
+    line y = concat [cell x y | x <- [lowerGridBound .. upperGridBound]]
 
 drawUi :: SState -> [T.Widget ()]
-drawUi state = [C.center $ B.border $ vBox (fmap str (snakeMatrix $ sSnake state))]
+drawUi (SState snake _) = [C.center $ B.border $ vBox (fmap str (snakeMatrix snake))]
 
 updateDirection :: SSnake -> SDirection -> SSnake
-updateDirection snake direction = SSnake {sBody = sBody snake, sDirection = newDirection}
+updateDirection (SSnake body oldDirection) direction = SSnake body newDirection
   where
-    newDirection = case (sDirection snake, direction) of
+    newDirection = case (oldDirection, direction) of
       (SUp, SLeft) -> SLeft
       (SUp, SRight) -> SRight
       (SRight, SUp) -> SUp
@@ -67,7 +54,7 @@ updateDirection snake direction = SSnake {sBody = sBody snake, sDirection = newD
       (dir, _) -> dir
 
 appEvent :: SState -> T.BrickEvent () STimeUnitEvent -> T.EventM () (T.Next SState)
-appEvent state (T.VtyEvent (V.EvKey keyAction [])) = case keyAction of
+appEvent state@(SState snake status) (T.VtyEvent (V.EvKey keyAction [])) = case keyAction of
   V.KUp -> action SUp
   V.KRight -> action SRight
   V.KDown -> action SDown
@@ -75,25 +62,16 @@ appEvent state (T.VtyEvent (V.EvKey keyAction [])) = case keyAction of
   V.KEsc -> M.halt state
   _ -> M.continue state
   where
-    action newDirection = M.continue SState {sStatus = sStatus state, sSnake = updateDirection (sSnake state) newDirection}
-appEvent state (T.AppEvent STimeUnitEvent) = case sDirection $ sSnake state of
-  SUp -> M.continue $ updated (row -1) col
-  SRight -> M.continue $ updated row (col + 1)
-  SDown -> M.continue $ updated (row + 1) col
-  SLeft -> M.continue $ updated row (col -1)
+    action newDirection = M.continue $ SState (updateDirection snake newDirection) status
+appEvent (SState (SSnake body direction) status) (T.AppEvent STimeUnitEvent) = case direction of
+  SUp -> M.continue $ updated x (y+1)
+  SRight -> M.continue $ updated (x+1) y
+  SDown -> M.continue $ updated x (y-1)
+  SLeft -> M.continue $ updated (x-1) y
   where
-    body = sBody $ sSnake state
-    row = sRow $ head body
-    col = sColumn $ head body
-    updated r c =
-      SState
-        { sStatus = sStatus state,
-          sSnake =
-            SSnake
-              { sBody = SPosition {sRow = r, sColumn = c} : (reverse $ tail $ reverse body),
-                sDirection = sDirection $ sSnake state
-              }
-        }
+    x = case body of (SPosition x' _) : _ -> x'; _ -> error "can't be"
+    y = case body of SPosition _ y' : _ -> y'; _ -> error "can't be"
+    updated newX newY = SState (SSnake ((SPosition newX newY) : (reverse $ tail $ reverse body)) direction) status
 appEvent state _ = M.continue state
 
 app :: M.App SState STimeUnitEvent ()
@@ -117,7 +95,7 @@ main = do
   eventChan <- Brick.BChan.newBChan 1
   let buildVty = Graphics.Vty.mkVty Graphics.Vty.defaultConfig
   initialVty <- buildVty
-  let initialState = SState {sSnake = SSnake {sBody = [SPosition {sRow = i, sColumn = 10} | i <- [9, 10 .. 18]], sDirection = SUp}, sStatus = SStarted}
+  let initialState = SState (SSnake [SPosition x 10 | x <- [13, 12 .. 2]] SRight) SStarted
   _ <- forkIO $ pingSnake eventChan
   _ <- M.customMain initialVty buildVty (Just eventChan) app initialState
   return ()
