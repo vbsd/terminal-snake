@@ -1,5 +1,3 @@
-module Main where
-
 import Brick.AttrMap
 import Brick.BChan
 import qualified Brick.Main as M
@@ -12,7 +10,7 @@ import Control.Monad
 import Graphics.Vty
 import qualified Graphics.Vty as V
 
-data SPosition = SPosition Integer Integer deriving (Show, Eq)
+data SPosition = SPosition Int Int deriving (Show, Eq)
 
 data SDirection = SUp | SRight | SDown | SLeft deriving (Show, Eq)
 
@@ -24,20 +22,26 @@ data SState = SState SSnake SStatus deriving (Show, Eq)
 
 data STimeUnitEvent = STimeUnitEvent
 
-lowerGridBound :: Integer
+lowerGridBound :: Int
 lowerGridBound = 1
 
-upperGridBound :: Integer
+upperGridBound :: Int
 upperGridBound = 20
 
-snakeMatrix :: SSnake -> [String]
-snakeMatrix (SSnake body _) = [line y | y <- [upperGridBound, upperGridBound - 1 .. lowerGridBound]]
+snakeMatrix :: SState -> [String]
+snakeMatrix (SState (SSnake body _) status) = case status of
+  SStarted -> grid
+  SInProgress -> grid
+  SOver -> loserGrid
   where
+    loserGrid = [if i `mod` 2 == 0 then s else loserLine | (i, s) <- zip [0 :: Int .. ] grid]
+    loserLine = take ((upperGridBound - lowerGridBound + 1) * 2) $ concat $ repeat "YOU LOSE "
+    grid = [line y | y <- [upperGridBound, upperGridBound - 1 .. lowerGridBound]]
     cell x y = if SPosition x y `elem` body then "()" else "  "
     line y = concat [cell x y | x <- [lowerGridBound .. upperGridBound]]
 
 drawUi :: SState -> [T.Widget ()]
-drawUi (SState snake _) = [C.center $ B.border $ vBox (fmap str (snakeMatrix snake))]
+drawUi state = [C.center $ B.border $ vBox (fmap str (snakeMatrix state))]
 
 updateDirection :: SSnake -> SDirection -> SSnake
 updateDirection (SSnake body oldDirection) direction = SSnake body newDirection
@@ -63,15 +67,24 @@ appEvent state@(SState snake status) (T.VtyEvent (V.EvKey keyAction [])) = case 
   _ -> M.continue state
   where
     action newDirection = M.continue $ SState (updateDirection snake newDirection) status
-appEvent (SState (SSnake body direction) status) (T.AppEvent STimeUnitEvent) = case direction of
-  SUp -> M.continue $ updated x (y+1)
-  SRight -> M.continue $ updated (x+1) y
-  SDown -> M.continue $ updated x (y-1)
-  SLeft -> M.continue $ updated (x-1) y
+appEvent state@(SState (SSnake body direction) status) (T.AppEvent STimeUnitEvent) = case status of
+  SOver -> M.continue state
+  _ -> case direction of
+    SUp -> M.continue $ updated x (y + 1)
+    SRight -> M.continue $ updated (x + 1) y
+    SDown -> M.continue $ updated x (y -1)
+    SLeft -> M.continue $ updated (x -1) y
   where
     x = case body of (SPosition x' _) : _ -> x'; _ -> error "can't be"
     y = case body of SPosition _ y' : _ -> y'; _ -> error "can't be"
-    updated newX newY = SState (SSnake ((SPosition newX newY) : (reverse $ tail $ reverse body)) direction) status
+    updated newX newY = case updatedBody newX newY of
+      newBody@(pos : _) ->
+        if pos `elem` body || min x y < lowerGridBound || max x y > upperGridBound
+          then SState (SSnake newBody direction) SOver
+          else SState (SSnake newBody direction) status
+      _ -> error "can't be"
+    updatedBody newX newY = (SPosition newX newY) : (reverse $ tail $ reverse body)
+      
 appEvent state _ = M.continue state
 
 app :: M.App SState STimeUnitEvent ()
