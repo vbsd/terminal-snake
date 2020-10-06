@@ -9,6 +9,7 @@ import Control.Concurrent
 import Control.Monad
 import Graphics.Vty
 import qualified Graphics.Vty as V
+import System.Random
 
 data SPosition = SPosition Int Int deriving (Show, Eq)
 
@@ -18,7 +19,7 @@ data SSnake = SSnake [SPosition] SDirection deriving (Show, Eq)
 
 data SStatus = SStarted | SInProgress | SOver deriving (Show, Eq)
 
-data SState = SState SSnake SStatus deriving (Show, Eq)
+data SState = SState SSnake SStatus [SPosition] StdGen deriving (Show)
 
 data STimeUnitEvent = STimeUnitEvent
 
@@ -26,39 +27,80 @@ lowerGridBound :: Int
 lowerGridBound = 1
 
 upperGridBound :: Int
-upperGridBound = 20
+upperGridBound = 21
 
 snakeMatrix :: SState -> [String]
-snakeMatrix (SState (SSnake body _) status) = case status of
+snakeMatrix (SState (SSnake body _) status food _) = case status of
   SStarted -> grid
   SInProgress -> grid
-  SOver -> loserGrid
+  SOver -> mergedGrid
   where
-    loserGrid = [if i `mod` 2 == 0 then s else loserLine | (i, s) <- zip [0 :: Int .. ] grid]
-    loserLine = take ((upperGridBound - lowerGridBound + 1) * 2) $ concat $ repeat "YOU LOSE "
-    grid = [line y | y <- [upperGridBound, upperGridBound - 1 .. lowerGridBound]]
-    cell x y = if SPosition x y `elem` body then "()" else "  "
+    mergedGrid = zipWith mergedLine loserGrid grid
+    mergedLine loserL snakeL = zipWith (\a b -> if a == ' ' then b else a) loserL snakeL
+    loserGrid = reverse [loserLine y | y <- [lowerGridBound .. upperGridBound]]
+    grid = reverse [line y | y <- [lowerGridBound .. upperGridBound]]
+    cell x y = if SPosition x y `elem` body then "()" else if SPosition x y `elem` food then "[]" else "  "
     line y = concat [cell x y | x <- [lowerGridBound .. upperGridBound]]
+    loserLine y =
+      if y `mod` 2 == 0
+        then take lineLength $ repeat ' '
+        else take lineLength $ drop y $ concat $ repeat "YOU LOSE  "
+    lineLength = (upperGridBound - lowerGridBound + 1) * 2
 
 drawUi :: SState -> [T.Widget ()]
 drawUi state = [C.center $ B.border $ vBox (fmap str (snakeMatrix state))]
 
 updateDirection :: SSnake -> SDirection -> SSnake
-updateDirection (SSnake body oldDirection) direction = SSnake body newDirection
+updateDirection (SSnake body oldDirection) direction
+  | (direction == SLeft || direction == SRight) && vertical = SSnake body direction
+  | (direction == SUp || direction == SDown) && horizontal = SSnake body direction
+  | otherwise = SSnake body oldDirection
   where
-    newDirection = case (oldDirection, direction) of
-      (SUp, SLeft) -> SLeft
-      (SUp, SRight) -> SRight
-      (SRight, SUp) -> SUp
-      (SRight, SDown) -> SDown
-      (SDown, SLeft) -> SLeft
-      (SDown, SRight) -> SRight
-      (SLeft, SUp) -> SUp
-      (SLeft, SDown) -> SDown
-      (dir, _) -> dir
+    horizontal = case body of
+      SPosition _ y : SPosition _ y' : _ -> y == y'
+      _ -> True
+    vertical = case body of
+      SPosition x _ : SPosition x' _ : _ -> x == x'
+      _ -> True
+
+moveSnake :: SState -> SState
+moveSnake (SState (SSnake body direction) status food rng) =
+  SState (SSnake newBody direction) newStatus newFood newRng
+  where
+    SPosition currentHeadX currentHeadY = head body
+    newHead = case direction of
+      SUp -> SPosition currentHeadX (currentHeadY + 1)
+      SRight -> SPosition (currentHeadX + 1) currentHeadY
+      SDown -> SPosition currentHeadX (currentHeadY - 1)
+      SLeft -> SPosition (currentHeadX - 1) currentHeadY
+    willBeOutOfBounds = case newHead of
+      SPosition newX newY ->
+        min newX newY < lowerGridBound
+          || max newX newY > upperGridBound
+          || newHead `elem` tail newBody
+    willEatFood = newHead `elem` food
+    (newFood, newRng) =
+      if not willEatFood || emptyCells == []
+        then (food, rng)
+        else case randomR (0 :: Int, length emptyCells - 1) rng of
+          (idx, rng') -> ([emptyCells !! idx], rng')
+    emptyCells =
+      [ SPosition x y
+        | x <- [lowerGridBound .. upperGridBound],
+          y <- [lowerGridBound .. upperGridBound],
+          not $ SPosition x y `elem` newBody
+      ]
+    newStatus = if willBeOutOfBounds then SOver else status
+    newBody =
+      if status == SOver
+        then body
+        else
+          if willEatFood
+            then newHead : body
+            else newHead : (reverse $ tail $ reverse body)
 
 appEvent :: SState -> T.BrickEvent () STimeUnitEvent -> T.EventM () (T.Next SState)
-appEvent state@(SState snake status) (T.VtyEvent (V.EvKey keyAction [])) = case keyAction of
+appEvent state@(SState snake status food rng) (T.VtyEvent (V.EvKey keyAction [])) = case keyAction of
   V.KUp -> action SUp
   V.KRight -> action SRight
   V.KDown -> action SDown
@@ -66,25 +108,8 @@ appEvent state@(SState snake status) (T.VtyEvent (V.EvKey keyAction [])) = case 
   V.KEsc -> M.halt state
   _ -> M.continue state
   where
-    action newDirection = M.continue $ SState (updateDirection snake newDirection) status
-appEvent state@(SState (SSnake body direction) status) (T.AppEvent STimeUnitEvent) = case status of
-  SOver -> M.continue state
-  _ -> case direction of
-    SUp -> M.continue $ updated x (y + 1)
-    SRight -> M.continue $ updated (x + 1) y
-    SDown -> M.continue $ updated x (y -1)
-    SLeft -> M.continue $ updated (x -1) y
-  where
-    x = case body of (SPosition x' _) : _ -> x'; _ -> error "can't be"
-    y = case body of SPosition _ y' : _ -> y'; _ -> error "can't be"
-    updated newX newY = case updatedBody newX newY of
-      newBody@(pos : _) ->
-        if pos `elem` body || min x y < lowerGridBound || max x y > upperGridBound
-          then SState (SSnake newBody direction) SOver
-          else SState (SSnake newBody direction) status
-      _ -> error "can't be"
-    updatedBody newX newY = (SPosition newX newY) : (reverse $ tail $ reverse body)
-      
+    action newDirection = M.continue $ SState (updateDirection snake newDirection) status food rng
+appEvent state (T.AppEvent STimeUnitEvent) = M.continue $ moveSnake state
 appEvent state _ = M.continue state
 
 app :: M.App SState STimeUnitEvent ()
@@ -108,7 +133,8 @@ main = do
   eventChan <- Brick.BChan.newBChan 1
   let buildVty = Graphics.Vty.mkVty Graphics.Vty.defaultConfig
   initialVty <- buildVty
-  let initialState = SState (SSnake [SPosition x 10 | x <- [13, 12 .. 2]] SRight) SStarted
+  rng <- getStdGen
+  let initialState = SState (SSnake [SPosition x 10 | x <- [12, 11 .. 10]] SRight) SStarted [SPosition 3 3] rng
   _ <- forkIO $ pingSnake eventChan
   _ <- M.customMain initialVty buildVty (Just eventChan) app initialState
   return ()
