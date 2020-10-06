@@ -101,7 +101,7 @@ moveSnake (SState (SSnake body direction) status food rng) =
           if willEatFood
             then newHead : body
             else newHead : (reverse $ tail $ reverse body)
-    (newFood, newRng) = if willEatFood then randomFood rng body else (food, rng)
+    (newFood, newRng) = if willEatFood then randomFood rng newBody else (food, rng)
 
 appEvent :: SState -> T.BrickEvent () STimeUnitEvent -> T.EventM () (T.Next SState)
 appEvent state@(SState snake status food rng) (T.VtyEvent (V.EvKey keyAction [])) = case keyAction of
