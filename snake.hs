@@ -1,12 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DuplicateRecordFields #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-{-# OPTIONS_GHC -fplugin=RecordDotPreprocessor #-}
-
 import Brick.AttrMap
 import Brick.BChan
 import qualified Brick.Main as M
@@ -21,31 +12,33 @@ import qualified Graphics.Vty as V
 import System.Random
 import Prelude hiding (Left, Right)
 
+
 data Position = Position
-  { positionX :: Int,
-    positionY :: Int
+  { _x :: Int,
+    _y :: Int
   }
   deriving (Show, Eq)
 
 data Direction = Up | Right | Down | Left deriving (Show, Eq)
 
 data Snake = Snake
-  { snakeBody :: [Position],
-    snakeDirection :: Direction
+  { _body :: [Position],
+    _direction :: Direction
   }
   deriving (Show, Eq)
 
 data Status = Started | InProgress | GameOver deriving (Show, Eq)
 
 data State = State
-  { stateSnake :: Snake,
-    stateStatus :: Status,
-    stateFood :: [Position],
-    stateRng :: StdGen
+  { _snake :: Snake,
+    _status :: Status,
+    _food :: [Position],
+    _rng :: StdGen
   }
   deriving (Show)
 
 data TimeUnitEvent = TimeUnitEvent
+
 
 lowerGridBound :: Int
 lowerGridBound = 1
@@ -54,7 +47,7 @@ upperGridBound :: Int
 upperGridBound = 21
 
 snakeMatrix :: State -> [String]
-snakeMatrix state = case state.stateStatus of
+snakeMatrix state = case _status state of
   Started -> grid
   InProgress -> grid
   GameOver -> mergedGrid
@@ -64,10 +57,10 @@ snakeMatrix state = case state.stateStatus of
     loserGrid = reverse [loserLine y | y <- [lowerGridBound .. upperGridBound]]
     grid = reverse [line y | y <- [lowerGridBound .. upperGridBound]]
     cell x y =
-      if Position x y `elem` (state.stateSnake.snakeBody)
+      if Position x y `elem` (_body . _snake $ state)
         then "()"
         else
-          if Position x y `elem` (stateFood state)
+          if Position x y `elem` (_food state)
             then "[]"
             else "  "
     line y = concat [cell x y | x <- [lowerGridBound .. upperGridBound]]
