@@ -54,12 +54,13 @@ snakeMatrix state = case _status state of
     zipWith (\a b -> if a == ' ' then b else a) loserL snake
   loserGrid = reverse [ loserLine y | y <- [lowerGridBound .. upperGridBound] ]
   grid      = reverse [ line y | y <- [lowerGridBound .. upperGridBound] ]
-  cell x y = if Position x y `elem` (_body . _snake $ state)
-    then "()"
-    else if Position x y `elem` (_food state) then "[]" else "  "
+  cell x y
+    | Position x y `elem` (_body . _snake $ state) = "()"
+    | Position x y `elem` _food state = "[]"
+    | otherwise = "  "
   line y = concat [ cell x y | x <- [lowerGridBound .. upperGridBound] ]
-  loserLine y = if y `mod` 2 == 0
-    then take lineLength $ repeat ' '
+  loserLine y = if even y
+    then replicate lineLength ' '
     else take lineLength $ drop y $ concat $ repeat "YOU LOSE  "
   lineLength = (upperGridBound - lowerGridBound + 1) * 2
 
@@ -80,7 +81,7 @@ updateDirection (Snake body oldDirection) direction
     _ -> True
 
 randomFood :: StdGen -> [Position] -> ([Position], StdGen)
-randomFood rng body = if emptyCells == []
+randomFood rng body = if null emptyCells
   then ([], rng)
   else case randomR (0 :: Int, length emptyCells - 1) rng of
     (idx, rng') -> ([emptyCells !! idx], rng')
@@ -89,7 +90,7 @@ randomFood rng body = if emptyCells == []
     [ Position x y
     | x <- [lowerGridBound .. upperGridBound]
     , y <- [lowerGridBound .. upperGridBound]
-    , not $ Position x y `elem` body
+    , Position x y `notElem` body
     ]
 
 moveSnake :: State -> State
@@ -115,11 +116,10 @@ moveSnake (State (Snake body direction) status food rng) = State
         `elem` tail newBody
   willEatFood = newHead `elem` food
   newStatus   = if willBeOutOfBounds then GameOver else status
-  newBody     = if status == GameOver
-    then body
-    else if willEatFood
-      then newHead : body
-      else newHead : (reverse $ tail $ reverse body)
+  newBody
+    | status == GameOver = body
+    | willEatFood = newHead : body
+    | otherwise = newHead : init body
   (newFood, newRng) =
     if willEatFood then randomFood rng newBody else (food, rng)
 
