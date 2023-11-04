@@ -1,0 +1,19 @@
+cabal-version:      3.6
+name:               terminal-snake
+version:            0.1.0.0
+author:             vbsd
+
+executable terminal-snake
+    main-is:          Main.hs
+    build-depends:    base ^>=4.17.2.0,
+                      brick ^>=2.1,
+                      microlens ^>=0.4.13.1,
+                      microlens-mtl ^>=0.2.0.3,
+                      microlens-th ^>=0.4.3.14,
+                      random ^>=1.2,
+                      vty ^>=6.0,
+                      vty-crossplatform ^>=0.1,
+    hs-source-dirs:   app
+    default-language: Haskell2010
+    ghc-options: -threaded -rtsopts
+

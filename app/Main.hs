@@ -1,3 +1,5 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 import           Brick.AttrMap
 import           Brick.BChan
 import qualified Brick.Main                    as M
@@ -8,11 +10,15 @@ import           Brick.Widgets.Core
 import           Control.Concurrent
 import           Control.Monad
 import           Graphics.Vty
+import           Graphics.Vty.CrossPlatform
 import qualified Graphics.Vty                  as V
 import           System.Random
 import           Prelude                 hiding ( Left
                                                 , Right
                                                 )
+import Lens.Micro.TH (makeLenses)
+import Lens.Micro.Mtl (use, (.=), (%=), zoom)
+import qualified Brick.Widgets.Edit as M
 
 data Position = Position
   { _x :: Int
@@ -35,6 +41,10 @@ data State = State
   , _rng :: StdGen
   } deriving (Show)
 
+makeLenses ''State
+makeLenses ''Snake
+makeLenses ''Position
+
 data TimeUnitEvent = TimeUnitEvent
 
 lowerGridBound :: Int
@@ -50,8 +60,6 @@ snakeMatrix state = case _status state of
   GameOver   -> mergedGrid
  where
   mergedGrid = zipWith mergedLine loserGrid grid
-  mergedLine loserL snake =
-    zipWith (\a b -> if a == ' ' then b else a) loserL snake
   loserGrid = reverse [ loserLine y | y <- [lowerGridBound .. upperGridBound] ]
   grid      = reverse [ line y | y <- [lowerGridBound .. upperGridBound] ]
   cell x y
@@ -61,14 +69,15 @@ snakeMatrix state = case _status state of
   line y = concat [ cell x y | x <- [lowerGridBound .. upperGridBound] ]
   loserLine y = if even y
     then replicate lineLength ' '
-    else take lineLength $ drop y $ concat $ repeat "YOU LOSE  "
+    else take lineLength $ drop y $ cycle "YOU LOSE  "
   lineLength = (upperGridBound - lowerGridBound + 1) * 2
+  mergedLine = zipWith (\a b -> if a == ' ' then b else a)
 
 drawUi :: State -> [T.Widget ()]
 drawUi state = [C.center $ B.border $ vBox (fmap str (snakeMatrix state))]
 
-updateDirection :: Snake -> Direction -> Snake
-updateDirection (Snake body oldDirection) direction
+updateDirection :: Direction -> Snake -> Snake
+updateDirection direction (Snake body oldDirection)
   | (direction == Left || direction == Right) && vertical = Snake body direction
   | (direction == Up || direction == Down) && horizontal = Snake body direction
   | otherwise = Snake body oldDirection
@@ -123,24 +132,21 @@ moveSnake (State (Snake body direction) status food rng) = State
   (newFood, newRng) =
     if willEatFood then randomFood rng newBody else (food, rng)
 
-appEvent :: State -> T.BrickEvent () TimeUnitEvent -> T.EventM () (T.Next State)
-appEvent state@(State snake status food rng) (T.VtyEvent (V.EvKey keyAction []))
-  = case keyAction of
-    V.KUp    -> action Up
-    V.KRight -> action Right
-    V.KDown  -> action Down
-    V.KLeft  -> action Left
-    V.KEsc   -> M.halt state
-    _        -> M.continue state
- where
-  action newDirection =
-    M.continue $ State (updateDirection snake newDirection) status food rng
-appEvent state (T.AppEvent TimeUnitEvent) = M.continue $ moveSnake state
-appEvent state _                          = M.continue state
+appEvent :: T.BrickEvent () TimeUnitEvent -> T.EventM () State ()
+appEvent e = case e of
+  T.AppEvent TimeUnitEvent -> T.modify moveSnake
+  T.VtyEvent (V.EvKey keyAction _) -> case keyAction of
+      V.KUp -> snake %= updateDirection Up
+      V.KDown -> snake %= updateDirection Down
+      V.KLeft -> snake %= updateDirection Left
+      V.KRight -> snake %= updateDirection Right
+      V.KEsc   -> M.halt
+      _        -> return ()
+  _ -> return ()
 
 app :: M.App State TimeUnitEvent ()
 app = M.App { M.appDraw         = drawUi
-            , M.appStartEvent   = return
+            , M.appStartEvent   = return ()
             , M.appHandleEvent  = appEvent
             , M.appAttrMap      = const $ attrMap V.defAttr []
             , M.appChooseCursor = M.neverShowCursor
@@ -155,7 +161,7 @@ pingSnake chan = forever $ do
 main :: IO ()
 main = do
   eventChan <- Brick.BChan.newBChan 1
-  let buildVty = Graphics.Vty.mkVty Graphics.Vty.defaultConfig
+  let buildVty = Graphics.Vty.CrossPlatform.mkVty Graphics.Vty.defaultConfig
   initialVty <- buildVty
   seed       <- randomIO :: IO Int
   let rng          = mkStdGen seed
